@@ -193,7 +193,7 @@ def main():
 
     # Send messages (2 messages) only if something triggered
     if triggered_any:
-        title = "**🚨 CAUCIÓN COLOCADORA ARS 🚨**"
+        title = "**🚨 CAUCIÓN COLOCADORA 🚨**"
         msg1 = title + "\n" + "\n".join(alert_lines) + "\n🚨"
         send_telegram(msg1)
 
