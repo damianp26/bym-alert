@@ -17,23 +17,23 @@
     "last_sent_rate": 33.3
   },
   "ARS_7": {
-    "last_sent_ts": 1767650092.6275015,
+    "last_sent_ts": 1767651236.361454,
     "last_sent_rate": 37.0
   },
   "ARS_10": {
-    "last_sent_ts": 1767650092.6275773,
+    "last_sent_ts": 1767651236.3615308,
     "last_sent_rate": 35.0
   },
   "ARS_14": {
-    "last_sent_ts": 1767650092.6276278,
+    "last_sent_ts": 1767651236.3615766,
     "last_sent_rate": 29.0
   },
   "ARS_21": {
-    "last_sent_ts": 1767650092.627723,
+    "last_sent_ts": 1767651236.3616467,
     "last_sent_rate": 31.3
   },
   "ARS_30": {
-    "last_sent_ts": 1767650092.62781,
+    "last_sent_ts": 1767651236.3617349,
     "last_sent_rate": 33.5
   }
 }
