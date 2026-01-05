@@ -30,16 +30,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 1 Primero procesa comandos de Telegram (puede actualizar thresholds.json / fees.json y state.json)
-      - name: Run bot commands
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          BYMA_VERIFY_SSL: "false"
-        run: |
-          python -u bot_commands.py
-
-      # 2 Después corre el monitor de alertas
       - name: Run monitor
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -48,7 +38,6 @@ jobs:
         run: |
           python -u monitor.py
 
-      # 3 Persiste cambios (offset del bot, state anti-spam, thresholds, fees)
       - name: Commit files if changed
         run: |
           if git diff --quiet; then
@@ -56,8 +45,8 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add state_actions.json thresholds.json fees.json
-            git commit -m "Update bot state/config"
+            git add state_actions.json
+            git commit -m "Update monitor state"
             git pull --rebase
             git push
           fi

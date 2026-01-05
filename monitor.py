@@ -6,7 +6,6 @@ import urllib3
 from datetime import datetime
 from pathlib import Path
 
-# --- Disable warnings when SSL verification is disabled ---
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BYMA_URL = "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/cauciones"
@@ -15,15 +14,21 @@ PAYLOAD = {"excludeZeroPxAndQty": True}
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# Control SSL verification via env var (GitHub Actions can set this to "false")
 BYMA_VERIFY_SSL = os.getenv("BYMA_VERIFY_SSL", "false").lower() == "true"
 
 STATE_FILE = Path("state_actions.json")
 THRESHOLDS_FILE = Path("thresholds.json")
 
 # --- Anti-spam tuning ---
-COOLDOWN_MINUTES = 15          # don't notify again for the same daysToMaturity until cooldown passes
-MIN_IMPROVEMENT = 0.10         # notify again sooner only if rate increases by at least this amount
+COOLDOWN_MINUTES = 15
+MIN_IMPROVEMENT = 0.10
+
+# --- Return estimate settings ---
+ASSUMED_AMOUNT = 100000.0          # ARS per triggered day
+DAY_BASIS = 365                    # 365 by default
+BROKER_COMMISSION = 0.0015         # 0.15%
+IVA_RATE = 0.21                    # 21% IVA on broker commission
+MARKET_FEE_RATE = 0.0              # optional extra fee on amount (set if you know it)
 
 
 def fetch_cauciones():
@@ -52,7 +57,7 @@ def send_telegram(text: str):
     payload = {
         "chat_id": CHAT_ID,
         "text": text,
-        "parse_mode": "Markdown",  # allows **bold**
+        "parse_mode": "Markdown",
         "disable_web_page_preview": True,
     }
     r = requests.post(url, json=payload, timeout=20)
@@ -70,34 +75,18 @@ def save_state(state):
 
 
 def load_thresholds():
-    """
-    thresholds.json format:
-    {
-      "day_min": 1,
-      "day_max": 30,
-      "thresholds": {
-        "1": 80.0,
-        "2": 75.0,
-        "7": 50.0
-      }
-    }
-    """
     if not THRESHOLDS_FILE.exists():
-        raise FileNotFoundError(
-            "thresholds.json not found. Create it in repo root with day_min/day_max/thresholds."
-        )
+        raise FileNotFoundError("thresholds.json not found in repo root.")
 
     cfg = json.loads(THRESHOLDS_FILE.read_text(encoding="utf-8"))
     day_min = int(cfg.get("day_min", 1))
     day_max = int(cfg.get("day_max", 30))
-
     thresholds = cfg.get("thresholds", {})
     thresholds = {str(k): float(v) for k, v in thresholds.items()}
     return day_min, day_max, thresholds
 
 
 def format_date_ars(maturity_date: str) -> str:
-    # expected: YYYY-MM-DD
     try:
         dt = datetime.strptime(maturity_date, "%Y-%m-%d")
         return dt.strftime("%d/%m/%Y")
@@ -105,21 +94,24 @@ def format_date_ars(maturity_date: str) -> str:
         return maturity_date or "?"
 
 
+def format_money_ars(x: float) -> str:
+    # e.g., 100000 -> $100.000,00
+    return f"${x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def should_notify(state: dict, key: str, rate: float) -> bool:
-    """
-    Per-key cooldown + minimum improvement rule.
-    State entry format:
-      state[key] = {"last_sent_ts": 1234567890, "last_sent_rate": 75.3}
-    """
     entry = state.get(key, {})
-    last_ts = float(entry.get("last_sent_ts", 0))
-    last_rate = float(entry.get("last_sent_rate", 0))
+    # backward compatibility if older formats exist
+    if isinstance(entry, (int, float)):
+        last_ts = 0.0
+        last_rate = float(entry)
+    else:
+        last_ts = float(entry.get("last_sent_ts", 0))
+        last_rate = float(entry.get("last_sent_rate", 0))
 
     now = time.time()
     cooldown_ok = (now - last_ts) >= (COOLDOWN_MINUTES * 60)
     improved_enough = rate >= (last_rate + MIN_IMPROVEMENT)
-
-    # Notify if cooldown passed OR the rate improved enough
     return cooldown_ok or improved_enough
 
 
@@ -130,15 +122,27 @@ def update_state(state: dict, key: str, rate: float):
     }
 
 
+def estimate_net_return(amount: float, days: int, annual_rate_pct: float) -> dict:
+    gross_interest = amount * (annual_rate_pct / 100.0) * (days / DAY_BASIS)
+    broker_total_rate = BROKER_COMMISSION * (1.0 + IVA_RATE)  # 0.15% * 1.21 = 0.1815%
+    total_cost = amount * (broker_total_rate + MARKET_FEE_RATE)
+    net_interest = gross_interest - total_cost
+    return {
+        "gross_interest": gross_interest,
+        "total_cost": total_cost,
+        "net_interest": net_interest,
+        "net_total": amount + net_interest,
+        "broker_total_rate": broker_total_rate,
+    }
+
+
 def main():
     data = fetch_cauciones()
-
-    # Only ARS
     ars = [x for x in data if x.get("denominationCcy") == "ARS"]
 
     day_min, day_max, thresholds = load_thresholds()
 
-    # Keep best (max settlementPrice) per daysToMaturity in range
+    # best offer per day (max settlementPrice)
     best_by_days = {}
     for x in ars:
         d = x.get("daysToMaturity")
@@ -147,24 +151,23 @@ def main():
         d = int(d)
         if d < day_min or d > day_max:
             continue
-
         rate = float(x.get("settlementPrice", 0.0))
         if d not in best_by_days or rate > float(best_by_days[d].get("settlementPrice", 0.0)):
             best_by_days[d] = x
 
     state = load_state()
-    triggered_lines = []
-    changed = False
 
-    # Evaluate only days that exist AND have threshold configured
+    alert_lines = []
+    calc_lines = []
+    changed = False
+    triggered_any = False
+
     for days, row in sorted(best_by_days.items()):
         threshold = thresholds.get(str(days))
         if threshold is None:
             continue
 
         rate = float(row.get("settlementPrice", 0.0))
-        vto = format_date_ars(row.get("maturityDate", ""))
-
         if rate < threshold:
             continue
 
@@ -172,19 +175,35 @@ def main():
         if not should_notify(state, key, rate):
             continue
 
-        # Build one-line entry for consolidated message
-        triggered_lines.append(
-            f"• {days} días | Vto: {vto} | Caución Colocadora: {rate:.2f}%"
+        vto = format_date_ars(row.get("maturityDate", ""))
+
+        # 1) Alert message line
+        alert_lines.append(f"• {days} días | Vto: {vto} | Caución Colocadora: {rate:.2f}%")
+        triggered_any = True
+
+        # 2) Calculation line for ARS 100,000
+        est = estimate_net_return(ASSUMED_AMOUNT, days, rate)
+        calc_lines.append(
+            f"• {days} días @ {rate:.2f}% → Neto aprox: {format_money_ars(est['net_interest'])} "
+            f"(bruto {format_money_ars(est['gross_interest'])} - costos {format_money_ars(est['total_cost'])})"
         )
 
         update_state(state, key, rate)
         changed = True
 
-    # Send ONE consolidated message if anything triggered
-    if triggered_lines:
-        title = "**🚨 CAUCIÓN COLOCADORA 🚨**"
-        msg = title + "\n" + "\n".join(triggered_lines) + "\n🚨"
-        send_telegram(msg)
+    # Send messages (2 messages) only if something triggered
+    if triggered_any:
+        title = "**🚨 CAUCIÓN COLOCADORA ARS 🚨**"
+        msg1 = title + "\n" + "\n".join(alert_lines) + "\n🚨"
+        send_telegram(msg1)
+
+        msg2_title = "**📌 Estimación colocando $100.000 en cada plazo**"
+        note = (
+            f"\n(Base {DAY_BASIS} días; comisión+IVA aprox {BROKER_COMMISSION*(1+IVA_RATE)*100:.4f}% sobre monto"
+            f"{'' if MARKET_FEE_RATE==0 else f' + mercado {MARKET_FEE_RATE*100:.4f}%'}.)"
+        )
+        msg2 = msg2_title + "\n" + "\n".join(calc_lines) + note
+        send_telegram(msg2)
 
     if changed:
         save_state(state)
