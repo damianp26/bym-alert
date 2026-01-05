@@ -41,6 +41,19 @@ def fetch_cauciones():
     return r.json()
 
 
+def escape_md_v2(text: str) -> str:
+    # Telegram MarkdownV2 reserved characters:
+    # _ * [ ] ( ) ~ ` > # + - = | { } . !
+    specials = r"_*[]()~`>#+-=|{}.!"
+    out = ""
+    for ch in text:
+        if ch in specials:
+            out += "\\" + ch
+        else:
+            out += ch
+    return out
+
+
 def send_telegram(text: str):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         raise RuntimeError("Missing TELEGRAM_TOKEN or TELEGRAM_CHAT_ID env vars")
@@ -48,12 +61,13 @@ def send_telegram(text: str):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown",
+        "text": escape_md_v2(text),
+        "parse_mode": "MarkdownV2",
         "disable_web_page_preview": True,
     }
     r = requests.post(url, json=payload, timeout=20)
     r.raise_for_status()
+
 
 
 def load_state():
