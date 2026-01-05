@@ -2,6 +2,9 @@ import os
 import json
 import requests
 from pathlib import Path
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 BYMA_URL = "https://open.bymadata.com.ar/vanoms-be-core/rest/api/bymadata/free/cauciones"
 PAYLOAD = {"excludeZeroPxAndQty": True}
@@ -25,7 +28,7 @@ def fetch_cauciones():
         "Origin": "https://open.bymadata.com.ar",
         "Referer": "https://open.bymadata.com.ar/",
     }
-    r = requests.post(BYMA_URL, json=PAYLOAD, headers=headers, timeout=20)
+    r = requests.post(BYMA_URL, json=PAYLOAD, headers=headers, timeout=20, verify=False)
     r.raise_for_status()
     return r.json()
 
