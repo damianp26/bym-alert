@@ -16,7 +16,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 BYMA_VERIFY_SSL = os.getenv("BYMA_VERIFY_SSL", "false").lower() == "true"
 
 STATE_FILE = Path("state_actions.json")
-RULES_FILE = Path("rules.json")  # your JSON
+RULES_FILE = Path("rules.json")
 
 # --- Anti-spam tuning ---
 COOLDOWN_MINUTES = 15
@@ -69,7 +69,6 @@ def send_telegram(text: str):
     r.raise_for_status()
 
 
-
 def load_state():
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
@@ -116,12 +115,32 @@ def format_date_ars(maturity_date: str) -> str:
         return maturity_date or "?"
 
 
-def format_money_ars(x: float) -> str:
-    return f"${x:,.0f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
 def format_money_ars2(x: float) -> str:
     return f"${x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def format_compact_ars_amount(x: float) -> str:
+    """
+    500000 -> 500k
+    1000000 -> 1M
+    1500000 -> 1,5M
+    2500000 -> 2,5M
+    """
+    x = float(x)
+
+    if x < 1_000_000:
+        k = x / 1_000
+        # show no decimals for k
+        return f"{int(round(k))}k"
+
+    m = x / 1_000_000
+    # show 0 decimals if integer, else 1 decimal with comma
+    if abs(m - round(m)) < 1e-9:
+        return f"{int(round(m))}M"
+    else:
+        m1 = round(m, 1)
+        s = f"{m1:.1f}".replace(".", ",")
+        return f"{s}M"
 
 
 def should_notify(state: dict, key: str, rate: float) -> bool:
@@ -149,13 +168,6 @@ def net_profit(amount: float, days: int, annual_rate_pct: float, base_days: int,
     return gross - cost
 
 
-def required_capital_for_profit(min_profit: float, days: int, annual_rate_pct: float, base_days: int, cost_rate: float):
-    per_peso = (annual_rate_pct / 100.0) * (days / base_days) - cost_rate
-    if per_peso <= 0:
-        return None
-    return min_profit / per_peso
-
-
 def main():
     cost_rate, base_days, capital_rules = load_rules()
 
@@ -181,9 +193,6 @@ def main():
     changed = False
     triggered_any = False
 
-    # Track best opportunity overall (by max net at capital_max)
-    best_pick = None  # dict with keys: days, rate, vto, cap, net, rule_min, rule_max
-
     for days, row in sorted(best_by_days.items()):
         rate = float(row.get("settlementPrice", 0.0))
         vto = format_date_ars(row.get("maturityDate", ""))
@@ -208,42 +217,20 @@ def main():
             net_min = net_profit(cap_min, days, rate, base_days, cost_rate)
             net_max = net_profit(cap_max, days, rate, base_days, cost_rate)
 
-            # If even at cap_max you can't reach min profit, skip this rule
+            # if even at cap_max it doesn't meet min profit => not useful
             if net_max < min_profit:
                 continue
 
-            # Determine "desde cuánto" meets min_net_profit
-            desde = None
-            if min_profit > 0:
-                req = required_capital_for_profit(min_profit, days, rate, base_days, cost_rate)
-                if req is not None:
-                    desde = max(cap_min, min(cap_max, req))
+            # ✅ if the min capital already meets the profit floor, else ⚠️
+            icon = "✅" if net_min >= min_profit else "⚠️"
 
-            range_label = f"{format_money_ars(cap_min)}–{format_money_ars(cap_max)}"
+            range_label = f"{format_compact_ars_amount(cap_min)}–{format_compact_ars_amount(cap_max)}"
             profit_label = f"Neto {format_money_ars2(net_min)}–{format_money_ars2(net_max)}"
 
-            if min_profit > 0:
-                if net_min >= min_profit:
-                    extra = f"✅ (min {format_money_ars(min_profit)} ok)"
-                else:
-                    extra = f"⚠️ (min {format_money_ars(min_profit)} desde {format_money_ars(desde) if desde else 'N/A'})"
-            else:
-                extra = ""
-
-            matching_rules_lines.append(f"• Capital {range_label} → {profit_label} {extra}")
-
-            # Update best pick using cap_max (max expected net in that rule)
-            if best_pick is None or net_max > best_pick["net"]:
-                best_pick = {
-                    "days": days,
-                    "rate": rate,
-                    "vto": vto,
-                    "cap": cap_max,
-                    "net": net_max,
-                    "cap_range": (cap_min, cap_max),
-                    "min_profit": min_profit,
-                    "threshold": threshold,
-                }
+            matching_rules_lines.append(
+                f"  {icon} Capital {range_label}\n"
+                f"     {profit_label}"
+            )
 
         if not matching_rules_lines:
             continue
@@ -256,29 +243,14 @@ def main():
         update_state(state, key, rate)
         changed = True
 
-        section = (
-            f"**{days} días** | Vto: {vto} | **Caución Colocadora ARS:** {rate:.2f}%\n"
-            + "\n".join(matching_rules_lines)
-        )
+        section_header = f"{days} días | Vto {vto} | Tasa {rate:.2f}%"
+        divider = "────────────"
+        section = section_header + "\n" + "\n".join(matching_rules_lines) + "\n" + divider
         day_sections.append(section)
 
     if triggered_any:
-        header = "**🚨 Oportunidades de Caución Colocadora (ARS) 🚨**"
-
-        best_block = ""
-        if best_pick is not None:
-            cap_min, cap_max = best_pick["cap_range"]
-            best_block = (
-                "\n\n"
-                "**🏆 Mejor neto estimado (usando capital_max del rango)**\n"
-                f"• Plazo: **{best_pick['days']} días** | Vto: {best_pick['vto']} | Tasa: {best_pick['rate']:.2f}%\n"
-                f"• Rango: {format_money_ars(cap_min)}–{format_money_ars(cap_max)} (usando {format_money_ars(best_pick['cap'])})\n"
-                f"• Neto estimado: **{format_money_ars2(best_pick['net'])}**\n"
-            )
-
-        footer = f"\n📌 Costos usados: {cost_rate*100:.4f}% sobre monto | Base: {base_days} días\n🚨"
-
-        msg = header + "\n\n" + "\n\n".join(day_sections) + best_block + footer
+        header = "🚨 Oportunidades de Caución Colocadora (ARS) 🚨"
+        msg = header + "\n\n" + "\n\n".join(day_sections)
         send_telegram(msg)
 
     if changed:
