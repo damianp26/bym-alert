@@ -20,7 +20,7 @@ RULES_FILE = Path("rules.json")
 
 # --- Anti-spam tuning ---
 COOLDOWN_MINUTES = 15
-MIN_IMPROVEMENT = 0.10  # if rate increases by >= this, notify again even within cooldown
+MIN_IMPROVEMENT = 0.10
 
 
 def fetch_cauciones():
@@ -120,21 +120,13 @@ def format_money_ars2(x: float) -> str:
 
 
 def format_compact_ars_amount(x: float) -> str:
-    """
-    500000 -> 500k
-    1000000 -> 1M
-    1500000 -> 1,5M
-    2500000 -> 2,5M
-    """
     x = float(x)
 
     if x < 1_000_000:
         k = x / 1_000
-        # show no decimals for k
         return f"{int(round(k))}k"
 
     m = x / 1_000_000
-    # show 0 decimals if integer, else 1 decimal with comma
     if abs(m - round(m)) < 1e-9:
         return f"{int(round(m))}M"
     else:
@@ -221,16 +213,11 @@ def main():
             if net_max < min_profit:
                 continue
 
-            # ✅ if the min capital already meets the profit floor, else ⚠️
             icon = "✅" if net_min >= min_profit else "⚠️"
-
             range_label = f"{format_compact_ars_amount(cap_min)}–{format_compact_ars_amount(cap_max)}"
-            profit_label = f"Neto {format_money_ars2(net_min)}–{format_money_ars2(net_max)}"
+            profit_label = f"{format_money_ars2(net_min)}–{format_money_ars2(net_max)}"
 
-            matching_rules_lines.append(
-                f"  {icon} Capital {range_label}\n"
-                f"     {profit_label}"
-            )
+            matching_rules_lines.append(f"  {icon} {range_label} -> {profit_label}")
 
         if not matching_rules_lines:
             continue
@@ -243,9 +230,13 @@ def main():
         update_state(state, key, rate)
         changed = True
 
-        section_header = f"{days} días | Vto {vto} | Tasa {rate:.2f}%"
         divider = "────────────"
-        section = section_header + "\n" + "\n".join(matching_rules_lines) + "\n" + divider
+        section = (
+            f"{days} días | Vto {vto} | Tasa {rate:.2f}%\n"
+            + "\n".join(matching_rules_lines)
+            + "\n"
+            + divider
+        )
         day_sections.append(section)
 
     if triggered_any:
