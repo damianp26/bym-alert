@@ -3,5 +3,25 @@
   "ARS_1": {
     "last_sent_ts": 1767648434.3909135,
     "last_sent_rate": 65.0
+  },
+  "ARS_2": {
+    "last_sent_ts": 1767648850.1523886,
+    "last_sent_rate": 41.0
+  },
+  "ARS_3": {
+    "last_sent_ts": 1767648850.1524277,
+    "last_sent_rate": 45.0
+  },
+  "ARS_4": {
+    "last_sent_ts": 1767648850.1524498,
+    "last_sent_rate": 33.3
+  },
+  "ARS_7": {
+    "last_sent_ts": 1767648850.1524687,
+    "last_sent_rate": 37.0
+  },
+  "ARS_10": {
+    "last_sent_ts": 1767648850.152486,
+    "last_sent_rate": 35.0
   }
 }
