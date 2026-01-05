@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 BYMA_VERIFY_SSL = os.getenv("BYMA_VERIFY_SSL", "false").lower() == "true"
 
-STATE_FILE = Path("state.json")
+STATE_FILE = Path("state_actions.json")
 THRESHOLDS_FILE = Path("thresholds.json")
 FEES_FILE = Path("fees.json")
 
