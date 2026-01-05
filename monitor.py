@@ -18,7 +18,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 # Control SSL verification via env var (GitHub Actions can set this to "false")
 BYMA_VERIFY_SSL = os.getenv("BYMA_VERIFY_SSL", "false").lower() == "true"
 
-STATE_FILE = Path("state.json")
+STATE_FILE = Path("state_actions.json")
 THRESHOLDS_FILE = Path("thresholds.json")
 
 # --- Anti-spam tuning ---
@@ -174,7 +174,7 @@ def main():
 
         # Build one-line entry for consolidated message
         triggered_lines.append(
-            f"• {days} días | Vto {vto} | Caución Colocadora: {rate:.2f}% (umbral {threshold:.2f}%)"
+            f"• {days} días | Vto: {vto} | Caución Colocadora: {rate:.2f}%"
         )
 
         update_state(state, key, rate)
@@ -182,7 +182,7 @@ def main():
 
     # Send ONE consolidated message if anything triggered
     if triggered_lines:
-        title = "**🚨 CAUCIÓN COLOCADORA ARS 🚨**"
+        title = "**🚨 CAUCIÓN COLOCADORA 🚨**"
         msg = title + "\n" + "\n".join(triggered_lines) + "\n🚨"
         send_telegram(msg)
 
